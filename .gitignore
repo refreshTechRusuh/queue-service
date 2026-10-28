@@ -1,0 +1,22 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+main
+bin/
+coverage.out
+coverage.cov
+.env
+# Test binary
+*.test
+*.out
+# Output files
+*.log
+*.log.*
+*.tmp
+# macOS
+.DS_Store
+# Visual Studio Code
+.vscode/
