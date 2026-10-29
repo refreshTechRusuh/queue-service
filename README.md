@@ -103,9 +103,11 @@ belakangan bisa terselip. Score = `INCR queue:seq:{e}` menjamin FCFS ketat.
    pernah ada `slot.released` untuknya — tanpa sweeper kursinya bocor dan antrian macet.
    Aman dari PHP: setelah token kedaluwarsa ia tak bisa submit lagi; bila sempat submit,
    tiketnya sudah di-hold (sudah keluar dari stok) sehingga kursi cadangannya tak dibutuhkan.
-2. **`slot.released` yang membawa `queueToken`** → kursi dilepas lebih awal (idempoten).
-   Payload BE-2 saat ini belum membawa `queueToken`; event tanpa field itu hanya
-   memicu promosi, kursinya tetap dilepas oleh sweeper.
+2. **`slot.released` dari BE-2 hanya memicu promosi, tidak melepas kursi.** Payload-nya tidak
+   membawa identitas orang di booking room; bila ikut menurunkan occupancy, satu orang bisa
+   terhitung keluar dua kali (sekali oleh sweeper) → orang ekstra masuk → risiko PHP.
+   BE-2 tidak perlu mengubah payload. (Opsional: bila kelak event membawa `queueToken`,
+   kursi orang itu dilepas lebih awal, idempoten per token.)
 
 ### Event Kafka yang dikonsumsi (consumer group `queue-service`)
 
@@ -123,6 +125,12 @@ sweeper & event berikutnya memulihkan state).
 `stock.changed` hanya dikirim saat stok **berubah**. Event yang baru dibuat belum pernah
 mengirimnya, sehingga saat cache stok kosong queue membaca `ticket_category` **sekali**
 (read-only) lalu selanjutnya hanya mengikuti `stock.changed`. Queue tidak pernah menulis DB.
+
+Pembacaan terjadi saat **orang pertama join** (saat penjualan benar-benar dibuka), bukan saat
+event/kategori dibuat — jadi tidak ada state yang harus bertahan berbulan-bulan di Redis, dan
+bila Redis kehilangan cache, queue cukup membaca ulang. Saat gerbang dibuka ribuan join datang
+bersamaan; `singleflight` memastikan per instance hanya **satu** yang membaca DB, sisanya
+menunggu hasil yang sama.
 
 ### Multi-instance (Cloud Run)
 

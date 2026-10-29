@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/refreshTechRusuh/queue-service/internal/queue/domain/dto"
 	"github.com/refreshTechRusuh/queue-service/internal/queue/domain/entity"
@@ -31,6 +32,9 @@ type Settings struct {
 	BookingTTL time.Duration // dipakai menghitung iat Access Token (exp - TTL)
 }
 
+// warmupTimeout = batas waktu membaca stok awal dari DB.
+const warmupTimeout = 5 * time.Second
+
 // QueueUsecase mengimplementasikan inbound.IQueueUsecase.
 type QueueUsecase struct {
 	store    outbound.IQueueStore
@@ -39,6 +43,7 @@ type QueueUsecase struct {
 	signer   outbound.IAccessTokenSigner
 	cfg      Settings
 	log      *slog.Logger
+	warmup   singleflight.Group // satu pembacaan DB per event per instance
 }
 
 func NewQueueUsecase(
@@ -218,6 +223,12 @@ func (u *QueueUsecase) Sweep(ctx context.Context) error {
 // ---- helper ----
 
 // ensureStock mengisi cache stok dari sumber (DB) bila masih kosong.
+//
+// Saat gerbang dibuka, ribuan join datang hampir bersamaan dan semuanya melihat
+// cache kosong. singleflight memastikan per instance hanya SATU yang membaca DB;
+// sisanya menunggu hasil yang sama. Pembacaan memakai context terlepas (dengan
+// timeout sendiri) supaya klien pertama yang memutus koneksi tidak menggagalkan
+// semua yang ikut menunggu.
 func (u *QueueUsecase) ensureStock(ctx context.Context, eventID string) error {
 	has, err := u.store.HasStock(ctx, eventID)
 	if err != nil {
@@ -225,6 +236,19 @@ func (u *QueueUsecase) ensureStock(ctx context.Context, eventID string) error {
 	}
 	if has {
 		return nil
+	}
+	_, err, _ = u.warmup.Do(eventID, func() (any, error) {
+		wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), warmupTimeout)
+		defer cancel()
+		return nil, u.loadStock(wctx, eventID)
+	})
+	return err
+}
+
+// loadStock membaca stok dari DB lalu mengisi cache (dipanggil lewat singleflight).
+func (u *QueueUsecase) loadStock(ctx context.Context, eventID string) error {
+	if has, err := u.store.HasStock(ctx, eventID); err == nil && has {
+		return nil // sudah diisi instance lain / stock.changed di sela-sela
 	}
 	stock, err := u.stock.LoadStock(ctx, eventID)
 	if err != nil {

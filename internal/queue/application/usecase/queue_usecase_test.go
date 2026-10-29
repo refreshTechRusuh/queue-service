@@ -32,8 +32,10 @@ const testSecret = "test-secret"
 // ---- fakes ----
 
 type fakeStock struct {
-	mu   sync.Mutex
-	data map[string]map[string]int
+	mu    sync.Mutex
+	data  map[string]map[string]int
+	calls int           // jumlah LoadStock dipanggil (uji singleflight)
+	delay time.Duration // simulasi query DB lambat
 }
 
 func (f *fakeStock) set(eventID string, stock map[string]int) {
@@ -43,6 +45,11 @@ func (f *fakeStock) set(eventID string, stock map[string]int) {
 }
 
 func (f *fakeStock) LoadStock(_ context.Context, eventID string) (map[string]int, error) {
+	f.mu.Lock()
+	f.calls++
+	d := f.delay
+	f.mu.Unlock()
+	time.Sleep(d)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := map[string]int{}
@@ -563,5 +570,39 @@ func TestAccessToken_ShouldBeVerifiableByBookingService_AndStableOnRefresh(t *te
 	// Refresh mengembalikan token yang SAMA (dibangun ulang deterministik dari state).
 	if again := e.status(t, eventID, res.QueueToken).AccessToken; again != res.AccessToken {
 		t.Error("access token berubah saat refresh; mau identik")
+	}
+}
+
+// ============================================================
+// Warm-up stok saat gerbang dibuka (singleflight)
+// ============================================================
+
+// 300 orang join bersamaan saat cache stok masih kosong → DB dibaca SEKALI saja.
+func TestJoin_ShouldLoadStockOnce_WhenManyJoinOnColdCache(t *testing.T) {
+	e := newEnv(t, opts{})
+	e.stock.delay = 100 * time.Millisecond
+	eventID := e.newEvent(30)
+
+	const n = 300
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if _, err := e.uc.Join(context.Background(), eventID, dto.JoinRequest{}); err != nil {
+				t.Errorf("join error: %v", err)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	if e.stock.calls != 1 {
+		t.Errorf("LoadStock dipanggil %d kali; mau 1", e.stock.calls)
+	}
+	if occ := e.occupancy(t, eventID); occ != 10 {
+		t.Errorf("occupancy = %d; mau 10", occ)
 	}
 }
