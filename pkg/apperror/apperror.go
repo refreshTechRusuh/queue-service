@@ -8,13 +8,12 @@ import "fmt"
 type ErrorCode string
 
 const (
-	ErrValidation     ErrorCode = "VALIDATION_ERROR" // 400
-	ErrNotFound       ErrorCode = "NOT_FOUND"        // 404
-	ErrQueueDuplicate ErrorCode = "QUEUE_DUPLICATE"  // 409 — NIK sudah memegang antrian aktif
-	ErrSoldOut        ErrorCode = "SOLD_OUT"         // 410 — tiket habis, antrian ditutup
-	ErrRateLimited    ErrorCode = "RATE_LIMITED"     // 429
-	ErrInternal       ErrorCode = "INTERNAL_ERROR"   // 500
-	ErrQueueFull      ErrorCode = "QUEUE_FULL"       // 503 — ramai, coba lagi (≠ sold out)
+	ErrValidation  ErrorCode = "VALIDATION_ERROR" // 400
+	ErrNotFound    ErrorCode = "NOT_FOUND"        // 404
+	ErrSoldOut     ErrorCode = "SOLD_OUT"         // 410 — tiket habis, antrian ditutup
+	ErrRateLimited ErrorCode = "RATE_LIMITED"     // 429
+	ErrInternal    ErrorCode = "INTERNAL_ERROR"   // 500
+	ErrQueueFull   ErrorCode = "QUEUE_FULL"       // 503 — ramai, coba lagi (≠ sold out)
 )
 
 // AppError adalah error domain dengan kode spesifik + pesan human-readable.
@@ -45,10 +44,7 @@ func (e *AppError) Unwrap() error { return e.cause }
 
 func Validation(msg string) *AppError    { return New(ErrValidation, msg) }
 func NotFound(resource string) *AppError { return New(ErrNotFound, resource+" tidak ditemukan") }
-func QueueDuplicate() *AppError {
-	return New(ErrQueueDuplicate, "NIK ini sudah memegang antrian aktif untuk event ini")
-}
-func SoldOut() *AppError { return New(ErrSoldOut, "Tiket sudah habis") }
+func SoldOut() *AppError                 { return New(ErrSoldOut, "Tiket sudah habis") }
 func RateLimited() *AppError {
 	return New(ErrRateLimited, "Terlalu banyak permintaan, coba lagi sebentar")
 }

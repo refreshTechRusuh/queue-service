@@ -20,7 +20,6 @@ import (
 )
 
 var (
-	nikPattern   = regexp.MustCompile(`^\d{16}$`)
 	tokenPattern = regexp.MustCompile(`^q_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	// eventIdPattern = UUID kanonik saja. Sengaja lebih ketat dari uuid.Parse (yang juga
 	// menerima "{...}" / "urn:uuid:"), karena eventId dipakai di dalam key Redis {eventId}.
@@ -61,14 +60,12 @@ func NewQueueUsecase(
 
 // Join: masuk antrian. Langsung ADMITTED bila ada kursi kosong & tak ada yang
 // menunggu di depan; selain itu QUEUED dengan posisi.
-func (u *QueueUsecase) Join(ctx context.Context, eventID string, req dto.JoinRequest) (dto.QueueStatusResponse, error) {
+// Join tidak menerima identitas apa pun (tanpa login, tanpa NIK): identitas pembeli
+// baru diisi di Detail Ticket dan divalidasi booking-service.
+func (u *QueueUsecase) Join(ctx context.Context, eventID string) (dto.QueueStatusResponse, error) {
 	eventID, err := normEventID(eventID)
 	if err != nil {
 		return dto.QueueStatusResponse{}, err
-	}
-	nik := strings.TrimSpace(req.NIK)
-	if nik != "" && !nikPattern.MatchString(nik) {
-		return dto.QueueStatusResponse{}, apperror.Validation("NIK harus 16 digit angka")
 	}
 	if err := u.ensureStock(ctx, eventID); err != nil {
 		return dto.QueueStatusResponse{}, err
@@ -78,7 +75,7 @@ func (u *QueueUsecase) Join(ctx context.Context, eventID string, req dto.JoinReq
 	}
 
 	token := newQueueToken()
-	res, err := u.store.Join(ctx, outbound.JoinParams{EventID: eventID, Token: token, NIK: nik})
+	res, err := u.store.Join(ctx, outbound.JoinParams{EventID: eventID, Token: token})
 	if err != nil {
 		return dto.QueueStatusResponse{}, apperror.Internal(err)
 	}
@@ -89,10 +86,8 @@ func (u *QueueUsecase) Join(ctx context.Context, eventID string, req dto.JoinReq
 		return dto.QueueStatusResponse{}, apperror.SoldOut()
 	case entity.OutcomeFull:
 		return dto.QueueStatusResponse{}, apperror.QueueFull()
-	case entity.OutcomeDuplicate:
-		return dto.QueueStatusResponse{}, apperror.QueueDuplicate()
 	case entity.OutcomeAdmitted:
-		return u.admitted(eventID, token, nik, res.ExpiresAt)
+		return u.admitted(eventID, token, res.ExpiresAt)
 	default: // QUEUED
 		return u.queued(ctx, eventID, token, res.Position), nil
 	}
@@ -122,7 +117,7 @@ func (u *QueueUsecase) Status(ctx context.Context, eventID, token string) (dto.Q
 			// Sudah lewat TTL tapi sweeper belum sempat jalan → tampilkan EXPIRED.
 			return dto.QueueStatusResponse{Status: string(entity.StatusExpired), QueueToken: token}, nil
 		}
-		return u.admitted(eventID, token, st.NIK, st.ExpiresAt)
+		return u.admitted(eventID, token, st.ExpiresAt)
 	case entity.StatusQueued:
 		return u.queued(ctx, eventID, token, st.Position), nil
 	case entity.StatusSoldOut:
@@ -263,11 +258,10 @@ func (u *QueueUsecase) loadStock(ctx context.Context, eventID string) error {
 	return nil
 }
 
-func (u *QueueUsecase) admitted(eventID, token, nik string, expiresAt time.Time) (dto.QueueStatusResponse, error) {
+func (u *QueueUsecase) admitted(eventID, token string, expiresAt time.Time) (dto.QueueStatusResponse, error) {
 	access, err := u.signer.Sign(entity.AccessClaims{
 		EventID:    eventID,
 		QueueToken: token,
-		NIK:        nik,
 		IssuedAt:   expiresAt.Add(-u.cfg.BookingTTL),
 		ExpiresAt:  expiresAt,
 	})

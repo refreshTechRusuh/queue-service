@@ -145,7 +145,7 @@ func (e *env) occupancy(t *testing.T, eventID string) int {
 
 func (e *env) join(t *testing.T, eventID string) dto.QueueStatusResponse {
 	t.Helper()
-	res, err := e.uc.Join(context.Background(), eventID, dto.JoinRequest{})
+	res, err := e.uc.Join(context.Background(), eventID)
 	if err != nil {
 		t.Fatalf("Join(%s) error tak terduga: %v", eventID, err)
 	}
@@ -187,7 +187,7 @@ func TestJoin_ShouldAdmitExactlyOne_WhenStock1AndTwoJoinConcurrently(t *testing.
 			go func() {
 				defer wg.Done()
 				<-start
-				res, err := e.uc.Join(context.Background(), eventID, dto.JoinRequest{})
+				res, err := e.uc.Join(context.Background(), eventID)
 				if err != nil {
 					t.Errorf("join error: %v", err)
 					return
@@ -228,7 +228,7 @@ func TestJoin_ShouldNeverExceedCap_WhenManyJoinConcurrently(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			res, err := e.uc.Join(context.Background(), eventID, dto.JoinRequest{})
+			res, err := e.uc.Join(context.Background(), eventID)
 			if err != nil {
 				t.Errorf("join error: %v", err)
 				return
@@ -437,7 +437,7 @@ func TestJoin_ShouldReturnQueueFull_WhenQueueCapReached(t *testing.T) {
 	eventID := e.newEvent(0)
 	e.join(t, eventID)
 	e.join(t, eventID)
-	_, err := e.uc.Join(context.Background(), eventID, dto.JoinRequest{})
+	_, err := e.uc.Join(context.Background(), eventID)
 	if errCode(err) != apperror.ErrQueueFull {
 		t.Fatalf("join ke-3: err=%v; mau QUEUE_FULL", err)
 	}
@@ -456,36 +456,11 @@ func TestSoldOut_ShouldCloseQueue_AndRejectNewJoin(t *testing.T) {
 	if s := e.status(t, eventID, tok).Status; s != "SOLD_OUT" {
 		t.Errorf("token di antrian: %s; mau SOLD_OUT", s)
 	}
-	if _, err := e.uc.Join(context.Background(), eventID, dto.JoinRequest{}); errCode(err) != apperror.ErrSoldOut {
+	if _, err := e.uc.Join(context.Background(), eventID); errCode(err) != apperror.ErrSoldOut {
 		t.Errorf("join setelah sold out: err=%v; mau SOLD_OUT", err)
 	}
 	if e.notifier.all[eventID] == 0 {
 		t.Error("NotifyAll tidak dipanggil saat sold out")
-	}
-}
-
-// ============================================================
-// BR-07: 1 NIK = 1 antrian aktif per event
-// ============================================================
-
-func TestJoin_ShouldRejectDuplicateNIK_WhenNIKAlreadyActive(t *testing.T) {
-	e := newEnv(t, opts{})
-	eventID := e.newEvent(0)
-	nik := "3273000000000001"
-
-	if _, err := e.uc.Join(context.Background(), eventID, dto.JoinRequest{NIK: nik}); err != nil {
-		t.Fatalf("join pertama: %v", err)
-	}
-	_, err := e.uc.Join(context.Background(), eventID, dto.JoinRequest{NIK: nik})
-	if errCode(err) != apperror.ErrQueueDuplicate {
-		t.Fatalf("join kedua NIK sama: err=%v; mau QUEUE_DUPLICATE", err)
-	}
-	if _, err := e.uc.Join(context.Background(), eventID, dto.JoinRequest{NIK: "3273000000000002"}); err != nil {
-		t.Errorf("NIK lain harus boleh: %v", err)
-	}
-	// NIK sama di EVENT LAIN tetap boleh.
-	if _, err := e.uc.Join(context.Background(), e.newEvent(0), dto.JoinRequest{NIK: nik}); err != nil {
-		t.Errorf("NIK sama di event lain harus boleh: %v", err)
 	}
 }
 
@@ -503,13 +478,12 @@ func TestValidation_ShouldRejectBadInput(t *testing.T) {
 		call func() error
 		want apperror.ErrorCode
 	}{
-		{"eventId bukan UUID", func() error { _, err := e.uc.Join(ctx, "abc", dto.JoinRequest{}); return err }, apperror.ErrValidation},
+		{"eventId bukan UUID", func() error { _, err := e.uc.Join(ctx, "abc"); return err }, apperror.ErrValidation},
 		{"eventId format kurung kurawal", func() error {
-			_, err := e.uc.Join(ctx, "{"+eventID+"}", dto.JoinRequest{})
+			_, err := e.uc.Join(ctx, "{"+eventID+"}")
 			return err
 		}, apperror.ErrValidation},
-		{"NIK bukan 16 digit", func() error { _, err := e.uc.Join(ctx, eventID, dto.JoinRequest{NIK: "123"}); return err }, apperror.ErrValidation},
-		{"event tidak ada", func() error { _, err := e.uc.Join(ctx, uuid.NewString(), dto.JoinRequest{}); return err }, apperror.ErrNotFound},
+		{"event tidak ada", func() error { _, err := e.uc.Join(ctx, uuid.NewString()); return err }, apperror.ErrNotFound},
 		{"queueToken format salah", func() error { _, err := e.uc.Status(ctx, eventID, "ngaco"); return err }, apperror.ErrValidation},
 		{"queueToken tidak dikenal", func() error {
 			_, err := e.uc.Status(ctx, eventID, "q_"+uuid.NewString())
@@ -533,7 +507,7 @@ func TestValidation_ShouldRejectBadInput(t *testing.T) {
 type bookingAccessTokenClaims struct {
 	EventID             string `json:"eventId"`
 	QueueToken          string `json:"queueToken"`
-	NIK                 string `json:"nik,omitempty"`
+	NIK                 string `json:"nik,omitempty"` // opsional di booking; queue tidak mengisinya
 	BookingTTLExpiresAt int64  `json:"bookingTtlExpiresAt"`
 	jwt.RegisteredClaims
 }
@@ -541,8 +515,7 @@ type bookingAccessTokenClaims struct {
 func TestAccessToken_ShouldBeVerifiableByBookingService_AndStableOnRefresh(t *testing.T) {
 	e := newEnv(t, opts{})
 	eventID := e.newEvent(3)
-	nik := "3273000000000001"
-	res, err := e.uc.Join(context.Background(), eventID, dto.JoinRequest{NIK: nik})
+	res, err := e.uc.Join(context.Background(), eventID)
 	if err != nil || res.Status != "ADMITTED" {
 		t.Fatalf("join: status=%s err=%v; mau ADMITTED", res.Status, err)
 	}
@@ -557,7 +530,7 @@ func TestAccessToken_ShouldBeVerifiableByBookingService_AndStableOnRefresh(t *te
 	if err != nil {
 		t.Fatalf("booking-service gagal memvalidasi token: %v", err)
 	}
-	if claims.EventID != eventID || claims.QueueToken != res.QueueToken || claims.NIK != nik {
+	if claims.EventID != eventID || claims.QueueToken != res.QueueToken || claims.NIK != "" {
 		t.Errorf("claim salah: %+v", claims)
 	}
 	if claims.BookingTTLExpiresAt != claims.ExpiresAt.Unix() {
@@ -591,7 +564,7 @@ func TestJoin_ShouldLoadStockOnce_WhenManyJoinOnColdCache(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			if _, err := e.uc.Join(context.Background(), eventID, dto.JoinRequest{}); err != nil {
+			if _, err := e.uc.Join(context.Background(), eventID); err != nil {
 				t.Errorf("join error: %v", err)
 			}
 		}()

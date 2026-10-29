@@ -11,7 +11,8 @@ import (
 // IQueueUsecase = kontrak antrian.
 type IQueueUsecase interface {
 	// HTTP
-	Join(ctx context.Context, eventID string, req dto.JoinRequest) (dto.QueueStatusResponse, error)
+	// Join tanpa identitas apa pun (tanpa login, tanpa NIK) — sesuai flow bisnis.
+	Join(ctx context.Context, eventID string) (dto.QueueStatusResponse, error)
 	Status(ctx context.Context, eventID, queueToken string) (dto.QueueStatusResponse, error)
 
 	// Event dari BE-2 (Kafka)

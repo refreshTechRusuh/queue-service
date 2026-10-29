@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"time"
 
@@ -32,16 +31,9 @@ func NewHandler(uc inbound.IQueueUsecase, waker Waker, sseTick time.Duration) *H
 	return &Handler{uc: uc, waker: waker, sseTick: sseTick}
 }
 
-// Join — POST /api/queue/v1/event/{eventId}/join   body opsional: {"nik":"..."}
+// Join — POST /api/queue/v1/event/{eventId}/join   tanpa body, tanpa login, tanpa NIK.
 func (h *Handler) Join(w http.ResponseWriter, r *http.Request) {
-	var req dto.JoinRequest
-	if r.Body != nil {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-			apinizer.FailedBadRequest(w, "body tidak valid")
-			return
-		}
-	}
-	res, err := h.uc.Join(r.Context(), r.PathValue("eventId"), req)
+	res, err := h.uc.Join(r.Context(), r.PathValue("eventId"))
 	if err != nil {
 		apinizer.WriteError(w, err)
 		return

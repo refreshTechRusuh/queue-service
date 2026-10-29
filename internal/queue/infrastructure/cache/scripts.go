@@ -85,23 +85,14 @@ local function releaseToken(tok, newStatus)
 end
 `
 
-// luaJoin: ARGV[5]=token, ARGV[6]=nik (” bila kosong), ARGV[7]=key penanda NIK, ARGV[8]=queue cap.
+// luaJoin: ARGV[5]=token, ARGV[6]=queue cap.
 // Return: {outcome, nilai, tokenLainYangTerAdmit...}
 //
 //	ADMITTED → nilai = expiresAt (ms) ; QUEUED → nilai = posisi (1 = terdepan)
 const luaJoin = luaCommon + `
-local token, nik, nikKey, queueCap = ARGV[5], ARGV[6], ARGV[7], tonumber(ARGV[8])
+local token, queueCap = ARGV[5], tonumber(ARGV[6])
 
 if redis.call('EXISTS', KEYS[6]) == 1 then return {'SOLD_OUT'} end
-
--- BR-07: 1 NIK = 1 antrian/slot AKTIF per event.
-if nik ~= '' then
-  local holder = redis.call('GET', nikKey)
-  if holder then
-    local st = redis.call('HGET', ARGV[1] .. holder, 'status')
-    if st == 'QUEUED' or st == 'ADMITTED' then return {'DUPLICATE'} end
-  end
-end
 
 if queueCap > 0 and redis.call('ZCARD', KEYS[1]) >= queueCap then return {'FULL'} end
 
@@ -109,10 +100,9 @@ if queueCap > 0 and redis.call('ZCARD', KEYS[1]) >= queueCap then return {'FULL'
 -- pendatang baru tak pernah menyalip orang yang sudah menunggu (FCFS).
 local now = nowms()
 local sk = ARGV[1] .. token
-redis.call('HSET', sk, 'status', 'QUEUED', 'nik', nik, 'joinedAt', now)
+redis.call('HSET', sk, 'status', 'QUEUED', 'joinedAt', now)
 redis.call('EXPIRE', sk, tonumber(ARGV[4]))
 redis.call('ZADD', KEYS[1], redis.call('INCR', KEYS[7]), token)
-if nik ~= '' then redis.call('SET', nikKey, token, 'EX', tonumber(ARGV[4])) end
 
 local promoted = promote(now)
 

@@ -169,9 +169,6 @@ func TestHTTP_ShouldMapErrorsToStatusCodes(t *testing.T) {
 		{"eventId tidak valid → 400", func() (*http.Response, error) {
 			return http.Post(srv.URL+"/api/queue/v1/event/abc/join", "application/json", nil)
 		}, http.StatusBadRequest},
-		{"body rusak → 400", func() (*http.Response, error) {
-			return http.Post(srv.URL+"/api/queue/v1/event/"+eventID+"/join", "application/json", strings.NewReader("{"))
-		}, http.StatusBadRequest},
 		{"event tidak ada → 404", func() (*http.Response, error) {
 			return http.Post(srv.URL+"/api/queue/v1/event/"+uuid.NewString()+"/join", "application/json", nil)
 		}, http.StatusNotFound},

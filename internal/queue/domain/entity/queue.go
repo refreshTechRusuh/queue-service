@@ -18,11 +18,10 @@ const (
 type JoinOutcome string
 
 const (
-	OutcomeAdmitted  JoinOutcome = "ADMITTED"
-	OutcomeQueued    JoinOutcome = "QUEUED"
-	OutcomeSoldOut   JoinOutcome = "SOLD_OUT"  // antrian sudah ditutup → 410
-	OutcomeFull      JoinOutcome = "FULL"      // queue cap tercapai → 503
-	OutcomeDuplicate JoinOutcome = "DUPLICATE" // NIK sudah memegang antrian aktif → 409
+	OutcomeAdmitted JoinOutcome = "ADMITTED"
+	OutcomeQueued   JoinOutcome = "QUEUED"
+	OutcomeSoldOut  JoinOutcome = "SOLD_OUT" // antrian sudah ditutup → 410
+	OutcomeFull     JoinOutcome = "FULL"     // queue cap tercapai → 503
 )
 
 // MaxTicketsPerBooking = batas tiket dalam satu kode booking. Dasar rumus anti-PHP.
@@ -61,7 +60,6 @@ func CapByStock(stock, globalCap int) int {
 type AccessClaims struct {
 	EventID    string
 	QueueToken string
-	NIK        string // kosong bila belum diketahui (guest belum isi)
 	IssuedAt   time.Time
 	ExpiresAt  time.Time // = batas TTL booking (5 menit sejak admitted)
 }

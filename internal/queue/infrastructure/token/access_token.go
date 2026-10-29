@@ -2,7 +2,10 @@
 //
 // Bentuk claim HARUS cocok dengan AccessTokenClaims di booking/event/payment-service:
 //
-//	{ eventId, queueToken, nik?, bookingTtlExpiresAt (unix), exp, iat, sub }
+//	{ eventId, queueToken, bookingTtlExpiresAt (unix), exp, iat, sub }
+//
+// (booking-service punya claim `nik` opsional; queue tidak mengisinya karena join
+// antrian memang tanpa identitas.)
 //
 // dan ditandatangani dengan ACCESS_TOKEN_SECRET yang SAMA dengan service tersebut.
 // Token self-verifiable: service lain memvalidasi lokal tanpa memanggil queue.
@@ -19,7 +22,6 @@ import (
 type accessClaims struct {
 	EventID             string `json:"eventId"`
 	QueueToken          string `json:"queueToken"`
-	NIK                 string `json:"nik,omitempty"`
 	BookingTTLExpiresAt int64  `json:"bookingTtlExpiresAt"`
 	jwt.RegisteredClaims
 }
@@ -37,7 +39,6 @@ func (s *Signer) Sign(c entity.AccessClaims) (string, error) {
 	claims := accessClaims{
 		EventID:             c.EventID,
 		QueueToken:          c.QueueToken,
-		NIK:                 c.NIK,
 		BookingTTLExpiresAt: c.ExpiresAt.Unix(),
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    "queue-service",

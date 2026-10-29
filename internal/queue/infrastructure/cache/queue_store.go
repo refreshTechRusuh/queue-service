@@ -64,7 +64,6 @@ func keyLog(e string) string       { return "admission:log:" + tag(e) }
 func keyClosed(e string) string    { return "queue:closed:" + tag(e) }
 func keySeq(e string) string       { return "queue:seq:" + tag(e) }
 func prefixToken(e string) string  { return "queue:token:" + tag(e) + ":" }
-func keyNIK(e, nik string) string  { return "queue:nik:" + tag(e) + ":" + nik }
 
 func (s *QueueStore) keys(e string) []string {
 	return []string{keyQueue(e), keyAdmitted(e), keyOccupancy(e), keyStock(e), keyLog(e), keyClosed(e), keySeq(e)}
@@ -111,7 +110,7 @@ func (s *QueueStore) SetStock(ctx context.Context, eventID, categoryID string, a
 // ---- antrian ----
 
 func (s *QueueStore) Join(ctx context.Context, p outbound.JoinParams) (outbound.JoinResult, error) {
-	args := append(s.baseArgs(p.EventID), p.Token, p.NIK, keyNIK(p.EventID, p.NIK), s.cfg.QueueCap)
+	args := append(s.baseArgs(p.EventID), p.Token, s.cfg.QueueCap)
 	raw, err := s.join.Run(ctx, s.rdb, s.keys(p.EventID), args...).Slice()
 	if err != nil {
 		return outbound.JoinResult{}, fmt.Errorf("redis join script: %w", err)
@@ -147,7 +146,6 @@ func (s *QueueStore) State(ctx context.Context, eventID, token string) (outbound
 	st := outbound.TokenState{
 		Found:  true,
 		Status: entity.Status(fields["status"]),
-		NIK:    fields["nik"],
 	}
 	if v, err := strconv.ParseInt(fields["expiresAt"], 10, 64); err == nil {
 		st.ExpiresAt = time.UnixMilli(v).UTC()

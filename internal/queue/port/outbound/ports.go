@@ -12,7 +12,6 @@ import (
 type JoinParams struct {
 	EventID string
 	Token   string
-	NIK     string // opsional
 }
 
 // JoinResult = hasil atomik masuk antrian.
@@ -27,7 +26,6 @@ type JoinResult struct {
 type TokenState struct {
 	Found     bool
 	Status    entity.Status
-	NIK       string
 	ExpiresAt time.Time // saat ADMITTED
 	Position  int64     // saat QUEUED
 }

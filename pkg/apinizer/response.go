@@ -56,8 +56,6 @@ func mapErrorCode(code apperror.ErrorCode) int {
 		return http.StatusBadRequest
 	case apperror.ErrNotFound:
 		return http.StatusNotFound
-	case apperror.ErrQueueDuplicate:
-		return http.StatusConflict
 	case apperror.ErrSoldOut:
 		return http.StatusGone
 	case apperror.ErrRateLimited:

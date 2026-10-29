@@ -16,9 +16,9 @@ import (
 
 // JoinRateLimit = batas join per IP per menit (fixed window di Redis, berlaku lintas instance).
 //
-// Guest belum punya identitas apa pun selain IP sampai NIK diisi, jadi titik join
-// adalah tempat paling rawan spam. Aturan 1 NIK = 1 antrian menjaga keadilan di
-// titik beli; rate limit ini menjaga sumber daya di titik antre.
+// Join antrian tanpa identitas apa pun (sesuai flow bisnis), jadi satu-satunya penanda
+// di titik antre adalah IP — tempat paling rawan spam. Keadilan di titik beli dijaga
+// booking-service (1 tiket per NIK); rate limit ini menjaga sumber daya di titik antre.
 // Bila Redis error → fail-open (journey tidak boleh putus karena limiter).
 func JoinRateLimit(rdb *redis.Client, perMinute int) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

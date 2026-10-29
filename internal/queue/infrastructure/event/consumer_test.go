@@ -22,7 +22,7 @@ type fakeUC struct {
 	calls    int
 }
 
-func (f *fakeUC) Join(context.Context, string, dto.JoinRequest) (dto.QueueStatusResponse, error) {
+func (f *fakeUC) Join(context.Context, string) (dto.QueueStatusResponse, error) {
 	return dto.QueueStatusResponse{}, nil
 }
 func (f *fakeUC) Status(context.Context, string, string) (dto.QueueStatusResponse, error) {

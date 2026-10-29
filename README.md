@@ -30,7 +30,7 @@ Tanpa Kafka (dev saja): `KAFKA_ENABLED=false make run` — event dari BE-2 tidak
 
 | Method | Path                                                  | Keterangan                                   |
 |--------|-------------------------------------------------------|----------------------------------------------|
-| POST   | `/api/queue/v1/event/{eventId}/join`                  | Masuk antrian. Body opsional `{"nik":"..."}` |
+| POST   | `/api/queue/v1/event/{eventId}/join`                  | Masuk antrian. Tanpa body, tanpa login, tanpa NIK |
 | GET    | `/api/queue/v1/event/{eventId}/{queueToken}`          | Cek status/posisi (dipakai saat refresh)     |
 | GET    | `/api/queue/v1/event/{eventId}/{queueToken}/stream`   | **SSE** posisi real-time                     |
 | GET    | `/sys/ping`                                           | Health check (ikut cek Redis)                |
@@ -65,9 +65,8 @@ Selain event, server mengirim heartbeat `: ping` tiap `QUEUE_SSE_TICK_SECONDS`.
 
 | HTTP | Kode              | Kapan                                         |
 |------|-------------------|-----------------------------------------------|
-| 400  | `VALIDATION_ERROR`| eventId bukan UUID, NIK bukan 16 digit, body rusak |
+| 400  | `VALIDATION_ERROR`| eventId bukan UUID / queueToken salah format  |
 | 404  | `NOT_FOUND`       | event tidak punya kategori, queueToken tak dikenal |
-| 409  | `QUEUE_DUPLICATE` | NIK sudah memegang antrian aktif di event ini (BR-07) |
 | 410  | `SOLD_OUT`        | tiket habis, antrian ditutup                  |
 | 429  | `RATE_LIMITED`    | join per IP melebihi batas per menit          |
 | 503  | `QUEUE_FULL`      | antrian penuh — "ramai, coba lagi" (≠ sold out) |
@@ -79,7 +78,7 @@ join ──▶ masuk antrian (nomor urut) ──▶ promosi dari DEPAN selama oc
             │                                  │
             │                                  ├─ ter-admit → ADMITTED (Access Token JWT, TTL 5 menit)
             │                                  └─ belum     → QUEUED (posisi)
-            └─ ditolak bila: sold out (410) · NIK duplikat (409) · antrian penuh (503)
+            └─ ditolak bila: sold out (410) · antrian penuh (503)
 
 bookingRoomCap = min( stok ≤ 3 ? 1 : floor(stok / 3) , GLOBAL_BOOKING_CAP )
 ```
@@ -145,8 +144,7 @@ berada di slot Redis yang sama (siap Redis Cluster).
 |------------------------------|--------|----------------------------------------------|
 | `queue:{e}`                  | ZSET   | antrian (member token, score nomor urut)     |
 | `queue:seq:{e}`              | STRING | counter nomor urut                           |
-| `queue:token:{e}:<token>`    | HASH   | status, nik, expiresAt                       |
-| `queue:nik:{e}:<nik>`        | STRING | token pemegang NIK (BR-07)                   |
+| `queue:token:{e}:<token>`    | HASH   | status, expiresAt                            |
 | `admitted:{e}`               | ZSET   | token di booking room (score = expiresAt ms) |
 | `admission:{e}`              | STRING | **occupancy** (jumlah orang di booking room) |
 | `stock:{e}`                  | HASH   | available per kategori                       |
@@ -158,7 +156,8 @@ berada di slot Redis yang sama (siap Redis Cluster).
 ## Access Token
 
 JWT HS256 dengan claim yang cocok dengan validasi booking/event/payment-service:
-`eventId`, `queueToken`, `nik` (bila diisi saat join), `bookingTtlExpiresAt`, `exp`, `iat`, `sub`.
+`eventId`, `queueToken`, `bookingTtlExpiresAt`, `exp`, `iat`, `sub`. Claim `nik` (opsional di
+booking-service) tidak diisi, karena join antrian memang tanpa identitas.
 Self-verifiable: service lain memvalidasi lokal dengan `ACCESS_TOKEN_SECRET` yang sama,
 tanpa memanggil queue. Token dibangun ulang secara deterministik dari state, jadi refresh
 mengembalikan token yang identik.
@@ -200,7 +199,7 @@ Lua tidak bisa dibuktikan dengan mock:
 - rumus cap di Lua identik dengan rumus Go (`entity.CapByStock`)
 - lepas M kursi → tepat M orang terdepan dipromosikan sekaligus
 - sweeper melepas kursi kedaluwarsa & mempromosikan berikutnya
-- 503 antrian penuh vs 410 sold out, NIK duplikat 409
+- 503 antrian penuh vs 410 sold out
 - Access Token tervalidasi dengan claim milik booking-service
 - SSE menerima `admitted` lewat Pub/Sub; consumer membaca dari broker Kafka asli
 

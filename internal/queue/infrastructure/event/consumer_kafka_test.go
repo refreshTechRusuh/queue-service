@@ -25,7 +25,7 @@ type safeUC struct {
 	released map[string]string // eventId → queueToken
 }
 
-func (s *safeUC) Join(context.Context, string, dto.JoinRequest) (dto.QueueStatusResponse, error) {
+func (s *safeUC) Join(context.Context, string) (dto.QueueStatusResponse, error) {
 	return dto.QueueStatusResponse{}, nil
 }
 func (s *safeUC) Status(context.Context, string, string) (dto.QueueStatusResponse, error) {

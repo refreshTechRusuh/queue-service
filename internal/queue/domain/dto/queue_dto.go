@@ -1,13 +1,6 @@
 // Package dto berisi bentuk request/response antrian (dengan tag JSON).
 package dto
 
-// JoinRequest = body opsional saat masuk antrian.
-// NIK boleh kosong: guest biasanya belum mengisi NIK saat antre (diisi di Detail Ticket).
-// Bila diisi, aturan 1 NIK = 1 antrian aktif per event langsung ditegakkan.
-type JoinRequest struct {
-	NIK string `json:"nik,omitempty"`
-}
-
 // QueueStatusResponse = isi field "data" untuk join & cek posisi.
 type QueueStatusResponse struct {
 	Status           string `json:"status"` // QUEUED | ADMITTED | EXPIRED | SOLD_OUT
