@@ -8,9 +8,12 @@ import "fmt"
 type ErrorCode string
 
 const (
-	ErrValidation ErrorCode = "VALIDATION_ERROR" // 400
-	ErrNotFound   ErrorCode = "NOT_FOUND"        // 404
-	ErrInternal   ErrorCode = "INTERNAL_ERROR"   // 500
+	ErrValidation  ErrorCode = "VALIDATION_ERROR" // 400
+	ErrNotFound    ErrorCode = "NOT_FOUND"        // 404
+	ErrSoldOut     ErrorCode = "SOLD_OUT"         // 410 — tiket habis, antrian ditutup
+	ErrRateLimited ErrorCode = "RATE_LIMITED"     // 429
+	ErrInternal    ErrorCode = "INTERNAL_ERROR"   // 500
+	ErrQueueFull   ErrorCode = "QUEUE_FULL"       // 503 — ramai, coba lagi (≠ sold out)
 )
 
 // AppError adalah error domain dengan kode spesifik + pesan human-readable.
@@ -41,6 +44,11 @@ func (e *AppError) Unwrap() error { return e.cause }
 
 func Validation(msg string) *AppError    { return New(ErrValidation, msg) }
 func NotFound(resource string) *AppError { return New(ErrNotFound, resource+" tidak ditemukan") }
+func SoldOut() *AppError                 { return New(ErrSoldOut, "Tiket sudah habis") }
+func RateLimited() *AppError {
+	return New(ErrRateLimited, "Terlalu banyak permintaan, coba lagi sebentar")
+}
+func QueueFull() *AppError { return New(ErrQueueFull, "Antrian sedang penuh, coba lagi sebentar") }
 func Internal(cause error) *AppError {
 	return Wrap(ErrInternal, "Terjadi kesalahan pada server", cause)
 }

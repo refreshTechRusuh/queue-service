@@ -56,6 +56,12 @@ func mapErrorCode(code apperror.ErrorCode) int {
 		return http.StatusBadRequest
 	case apperror.ErrNotFound:
 		return http.StatusNotFound
+	case apperror.ErrSoldOut:
+		return http.StatusGone
+	case apperror.ErrRateLimited:
+		return http.StatusTooManyRequests
+	case apperror.ErrQueueFull:
+		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError
 	}

@@ -1,5 +1,5 @@
 // Package main = entry point queue-service.
-// Tugas main: startup (load config, konek Redis, rakit server) + graceful shutdown.
+// Tugas main: startup (config, Redis, DB, rakit server) + graceful shutdown.
 package main
 
 import (
@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/refreshTechRusuh/queue-service/internal/config"
 	"github.com/refreshTechRusuh/queue-service/internal/delivery"
+	pkgdb "github.com/refreshTechRusuh/queue-service/pkg/db"
 	pkgredis "github.com/refreshTechRusuh/queue-service/pkg/redis"
 )
 
@@ -27,6 +29,7 @@ func main() {
 	}
 	config.SetupLogger(cfg.Log)
 
+	// rootCtx dibatalkan saat shutdown → menghentikan hub, sweeper, consumer Kafka.
 	rootCtx, cancelRoot := context.WithCancel(context.Background())
 	defer cancelRoot()
 
@@ -38,14 +41,34 @@ func main() {
 	}
 	defer func() { _ = rdb.Close() }()
 
-	// 3. Rakit server.
+	// 3. PostgreSQL hanya untuk warm-up stok (read-only). Belum siap ≠ gagal start:
+	//    event yang cache stoknya sudah ada tetap bisa dilayani.
+	pool, err := pkgdb.NewPool(rootCtx, pkgdb.Config{DSN: cfg.DB.DSN(), MaxConns: cfg.DB.MaxConns})
+	if err != nil {
+		slog.Error("konfigurasi postgres tidak valid", "err", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+	pingCtx, cancelPing := context.WithTimeout(rootCtx, 5*time.Second)
+	if err := pool.Ping(pingCtx); err != nil {
+		slog.Warn("postgres belum terjangkau; warm-up stok akan gagal sampai DB siap", "err", err)
+	}
+	cancelPing()
+
+	// 4. Rakit server + proses latar.
+	handler, closeDeps := delivery.New(rootCtx, cfg, rdb, pool)
+	defer closeDeps()
+
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.App.Port),
-		Handler:           delivery.New(cfg, rdb),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
+		// Tanpa WriteTimeout: koneksi SSE memang dibiarkan terbuka lama.
+		// Context tiap request diturunkan dari rootCtx → cancelRoot() memutus semua
+		// stream SSE, sehingga Shutdown tidak menunggu koneksi yang tak pernah selesai.
+		BaseContext: func(net.Listener) context.Context { return rootCtx },
 	}
 
-	// 4. Jalankan di goroutine supaya main bisa menunggu sinyal berhenti.
 	go func() {
 		slog.Info("queue-service listening", "port", cfg.App.Port)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -60,7 +83,7 @@ func main() {
 	<-quit
 
 	slog.Info("shutting down...")
-	cancelRoot()
+	cancelRoot() // hentikan proses latar + putus koneksi SSE (ctx request turunan)
 	shutCtx, cancelShut := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelShut()
 	if err := srv.Shutdown(shutCtx); err != nil {
