@@ -1,0 +1,144 @@
+name: Build & Deploy to Cloud Run
+
+# PR ke main  -> test + build + push image (tanpa deploy)
+# Push ke main -> test + build + push + deploy ke Cloud Run
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: ${{ secrets.GCP_REGION }}
+  SERVICE_NAME: queue-service
+  AR_HOST: asia-southeast2-docker.pkg.dev
+  IMAGE: asia-southeast2-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/rusuh/queue-service
+
+permissions:
+  contents: read
+  id-token: write   # diperlukan untuk Workload Identity Federation
+
+jobs:
+  build-and-deploy:
+    name: Test, Build, Push & Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Vet & unit test
+        run: |
+          go vet ./...
+          go test ./...
+
+      # Gagal cepat bila GitHub Variable belum diisi (env kosong -> app jatuh ke
+      # default lokal seperti REDIS_ADDR=localhost dan crash di Cloud Run).
+      - name: Check required GitHub Variables
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          APP_ENV: ${{ vars.APP_ENV }}
+          APP_PORT: ${{ vars.APP_PORT }}
+          DB_HOST: ${{ vars.DB_HOST }}
+          DB_NAME: ${{ vars.DB_NAME }}
+          REDIS_ADDR: ${{ vars.REDIS_ADDR }}
+          KAFKA_BROKERS: ${{ vars.KAFKA_BROKERS }}
+          KAFKA_TLS: ${{ vars.KAFKA_TLS }}
+        run: |
+          for k in APP_ENV APP_PORT DB_HOST DB_NAME REDIS_ADDR KAFKA_BROKERS KAFKA_TLS; do
+            [ -n "${!k}" ] || { echo "::error::GitHub Variable $k kosong"; exit 1; }
+          done
+          # Kafka sekarang self-host di VM (bukan Confluent Cloud).
+          case "$KAFKA_BROKERS" in
+            *confluent.cloud*) echo "::error::KAFKA_BROKERS masih menunjuk Confluent; ganti ke <ip-vm>:9092"; exit 1 ;;
+          esac
+
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker auth for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.AR_HOST }} --quiet
+
+      - name: Build Docker image (linux/amd64)
+        run: |
+          docker build \
+            --platform linux/amd64 \
+            --tag ${{ env.IMAGE }}:${{ github.sha }} \
+            --tag ${{ env.IMAGE }}:latest \
+            .
+
+      - name: Push image to Artifact Registry
+        run: |
+          docker push ${{ env.IMAGE }}:${{ github.sha }}
+          docker push ${{ env.IMAGE }}:latest
+
+      # Env non-rahasia dari GitHub Variables; secret dari Secret Manager
+      # (hanya NAMA secret yang ada di sini, nilainya tidak pernah ke GitHub).
+      # Setting infra (VPC connector, akses publik, min-instances=1,
+      # no-cpu-throttling, timeout SSE 3600s) diset sekali oleh
+      # deploy/gcp/08_be1_deploy_cloudrun.sh dan tidak diubah di sini.
+      #
+      # Kafka self-host di VM data (KAFKA_BROKERS=<ip-vm>:9092, KAFKA_TLS=false),
+      # tanpa SASL → tidak ada KAFKA_USERNAME/PASSWORD. Strategi "overwrite"
+      # membuat daftar di bawah jadi satu-satunya sumber kebenaran, sehingga
+      # secret Confluent lama ikut terhapus dari service (bila tertinggal, client
+      # Kafka otomatis mengaktifkan SASL+TLS dan gagal konek ke VM).
+      - name: Deploy to Cloud Run
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region: ${{ env.REGION }}
+          image: ${{ env.IMAGE }}:${{ github.sha }}
+          env_vars: |
+            APP_ENV=${{ vars.APP_ENV }}
+            APP_PORT=${{ vars.APP_PORT }}
+            LOG_LEVEL=${{ vars.LOG_LEVEL }}
+            LOG_FORMAT=${{ vars.LOG_FORMAT }}
+            DB_HOST=${{ vars.DB_HOST }}
+            DB_PORT=${{ vars.DB_PORT }}
+            DB_USER=${{ vars.DB_USER }}
+            DB_NAME=${{ vars.DB_NAME }}
+            DB_SSL_MODE=${{ vars.DB_SSL_MODE }}
+            DB_MAX_CONNS=${{ vars.DB_MAX_CONNS }}
+            REDIS_ADDR=${{ vars.REDIS_ADDR }}
+            REDIS_DB=${{ vars.REDIS_DB }}
+            BOOKING_TTL_SECONDS=${{ vars.BOOKING_TTL_SECONDS }}
+            GLOBAL_BOOKING_CAP=${{ vars.GLOBAL_BOOKING_CAP }}
+            QUEUE_CAP=${{ vars.QUEUE_CAP }}
+            QUEUE_STATE_TTL_SECONDS=${{ vars.QUEUE_STATE_TTL_SECONDS }}
+            QUEUE_CLOSED_TTL_SECONDS=${{ vars.QUEUE_CLOSED_TTL_SECONDS }}
+            QUEUE_SWEEP_INTERVAL_MS=${{ vars.QUEUE_SWEEP_INTERVAL_MS }}
+            QUEUE_SSE_TICK_SECONDS=${{ vars.QUEUE_SSE_TICK_SECONDS }}
+            QUEUE_JOIN_RATE_PER_MIN=${{ vars.QUEUE_JOIN_RATE_PER_MIN }}
+            KAFKA_ENABLED=${{ vars.KAFKA_ENABLED }}
+            KAFKA_BROKERS=${{ vars.KAFKA_BROKERS }}
+            KAFKA_TLS=${{ vars.KAFKA_TLS }}
+            KAFKA_GROUP_ID=${{ vars.KAFKA_GROUP_ID }}
+          env_vars_update_strategy: overwrite
+          secrets: |
+            DB_PASSWORD=db-password:latest
+            REDIS_PASSWORD=redis-password:latest
+            ACCESS_TOKEN_SECRET=access-token-secret:latest
+          secrets_update_strategy: overwrite
+          flags: --no-traffic
+
+      - name: Route traffic to new revision
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          gcloud run services update-traffic ${{ env.SERVICE_NAME }} \
+            --to-latest \
+            --region=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }}
