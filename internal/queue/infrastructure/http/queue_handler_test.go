@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
@@ -42,17 +43,25 @@ type envelope struct {
 	} `json:"data"`
 }
 
-func newServer(t *testing.T, eventID string, stock int) (*httptest.Server, *usecase.QueueUsecase) {
+// testRedis: TEST_REDIS_ADDR diisi → Redis ASLI; kosong → miniredis (tidak di-skip di CI).
+func testRedis(t *testing.T, db int) *redis.Client {
 	t.Helper()
 	addr := os.Getenv("TEST_REDIS_ADDR")
 	if addr == "" {
-		addr = "localhost:6379"
+		addr = miniredis.RunT(t).Addr()
 	}
-	rdb := redis.NewClient(&redis.Options{Addr: addr, DB: 14})
+	rdb := redis.NewClient(&redis.Options{Addr: addr, DB: db})
 	if err := rdb.Ping(context.Background()).Err(); err != nil {
-		t.Skipf("redis tidak tersedia: %v", err)
+		t.Fatalf("redis test tidak terjangkau di %s: %v", addr, err)
 	}
 	_ = rdb.FlushDB(context.Background()).Err()
+	t.Cleanup(func() { _ = rdb.Close() })
+	return rdb
+}
+
+func newServer(t *testing.T, eventID string, stock int) (*httptest.Server, *usecase.QueueUsecase) {
+	t.Helper()
+	rdb := testRedis(t, 14)
 
 	store := cache.NewQueueStore(rdb, cache.StoreSettings{
 		BookingTTL: 5 * time.Minute, StateTTL: time.Hour, ClosedTTL: time.Hour,

@@ -7,19 +7,27 @@ import (
 	"os"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 )
 
 // Redis DB 13 khusus paket test ini (paket lain memakai 14/15; paket berjalan paralel).
 func newRateRedis(t *testing.T) *redis.Client {
 	t.Helper()
+	return testRedis(t, 13)
+}
+
+// testRedis: bila TEST_REDIS_ADDR diisi → pakai Redis ASLI (bukti atomisitas sesungguhnya);
+// bila tidak → miniredis di memori, sehingga test TIDAK di-skip di CI yang tak punya Redis.
+func testRedis(t *testing.T, db int) *redis.Client {
+	t.Helper()
 	addr := os.Getenv("TEST_REDIS_ADDR")
 	if addr == "" {
-		addr = "localhost:6379"
+		addr = miniredis.RunT(t).Addr()
 	}
-	rdb := redis.NewClient(&redis.Options{Addr: addr, DB: 13})
+	rdb := redis.NewClient(&redis.Options{Addr: addr, DB: db})
 	if err := rdb.Ping(context.Background()).Err(); err != nil {
-		t.Skipf("redis tidak tersedia: %v", err)
+		t.Fatalf("redis test tidak terjangkau di %s: %v", addr, err)
 	}
 	_ = rdb.FlushDB(context.Background()).Err()
 	t.Cleanup(func() { _ = rdb.Close() })

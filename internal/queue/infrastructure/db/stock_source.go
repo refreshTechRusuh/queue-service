@@ -11,15 +11,21 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
 )
+
+// Querier = potongan minimal pgxpool.Pool yang dipakai StockSource.
+// *pgxpool.Pool memenuhinya (produksi); fake di stock_source_unit_test.go (unit test).
+type Querier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
 
 // StockSource = implementasi outbound.IStockSource.
 type StockSource struct {
-	pool *pgxpool.Pool
+	pool Querier
 }
 
-func NewStockSource(pool *pgxpool.Pool) *StockSource { return &StockSource{pool: pool} }
+func NewStockSource(pool Querier) *StockSource { return &StockSource{pool: pool} }
 
 // LoadStock mengembalikan available per kategori. Map kosong = event tak punya kategori.
 func (s *StockSource) LoadStock(ctx context.Context, eventID string) (map[string]int, error) {

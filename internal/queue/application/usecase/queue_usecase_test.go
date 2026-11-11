@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -94,20 +95,28 @@ type opts struct {
 	bookingTTL time.Duration
 }
 
-func newEnv(t *testing.T, o opts) *env {
+// testRedis: bila TEST_REDIS_ADDR diisi → pakai Redis ASLI (bukti atomisitas sesungguhnya);
+// bila tidak → miniredis di memori, sehingga test TIDAK di-skip di CI yang tak punya Redis.
+func testRedis(t *testing.T, db int) *redis.Client {
 	t.Helper()
 	addr := os.Getenv("TEST_REDIS_ADDR")
 	if addr == "" {
-		addr = "localhost:6379"
+		addr = miniredis.RunT(t).Addr()
 	}
-	rdb := redis.NewClient(&redis.Options{Addr: addr, DB: 15})
+	rdb := redis.NewClient(&redis.Options{Addr: addr, DB: db})
 	if err := rdb.Ping(context.Background()).Err(); err != nil {
-		t.Skipf("redis tidak tersedia di %s: %v", addr, err)
+		t.Fatalf("redis test tidak terjangkau di %s: %v", addr, err)
 	}
 	if err := rdb.FlushDB(context.Background()).Err(); err != nil {
 		t.Fatalf("flush redis test db: %v", err)
 	}
 	t.Cleanup(func() { _ = rdb.Close() })
+	return rdb
+}
+
+func newEnv(t *testing.T, o opts) *env {
+	t.Helper()
+	rdb := testRedis(t, 15)
 
 	if o.bookingTTL == 0 {
 		o.bookingTTL = 5 * time.Minute
