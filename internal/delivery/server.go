@@ -83,7 +83,15 @@ func New(ctx context.Context, cfg *config.Config, rdb *goredis.Client, pool *pgx
 		_, _ = w.Write([]byte(`{"status":"00000","message":"queue-service ok","data":{}}`))
 	})
 
-	return middleware.Chain(mux, middleware.CORSMiddleware("*"), middleware.TransactionID), closeFn
+	// Middleware global (luar -> dalam): CORS, tracing, transaction-id.
+	// CORS di luar tracing agar preflight tidak membuat span. /stream (SSE berjam-jam)
+	// dan /sys/ping dikecualikan: span SSE baru selesai saat koneksi putus dan health
+	// check hanya menambah noise.
+	return middleware.Chain(mux,
+		middleware.CORSMiddleware("*"),
+		middleware.OtelMiddleware("queue-service", "/sys/ping", "/stream"),
+		middleware.TransactionID,
+	), closeFn
 }
 
 // runSweeper memanggil sweep berkala sampai ctx dibatalkan.
