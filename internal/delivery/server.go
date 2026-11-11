@@ -83,7 +83,7 @@ func New(ctx context.Context, cfg *config.Config, rdb *goredis.Client, pool *pgx
 		_, _ = w.Write([]byte(`{"status":"00000","message":"queue-service ok","data":{}}`))
 	})
 
-	return middleware.Chain(mux, middleware.TransactionID), closeFn
+	return middleware.Chain(mux, middleware.CORSMiddleware("*"), middleware.TransactionID), closeFn
 }
 
 // runSweeper memanggil sweep berkala sampai ctx dibatalkan.
