@@ -107,6 +107,8 @@ jobs:
             APP_PORT=${{ vars.APP_PORT }}
             LOG_LEVEL=${{ vars.LOG_LEVEL }}
             LOG_FORMAT=${{ vars.LOG_FORMAT }}
+            OTEL_ENABLED=${{ vars.OTEL_ENABLED }}
+            OTEL_SAMPLE_RATIO=${{ vars.OTEL_SAMPLE_RATIO }}
             DB_HOST=${{ vars.DB_HOST }}
             DB_PORT=${{ vars.DB_PORT }}
             DB_USER=${{ vars.DB_USER }}

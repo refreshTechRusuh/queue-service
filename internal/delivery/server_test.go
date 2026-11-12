@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -16,6 +17,10 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/refreshTechRusuh/queue-service/internal/config"
 )
@@ -89,6 +94,35 @@ func TestNew_ShouldWireJoinAndStatusRoutes(t *testing.T) {
 	require.Equal(t, http.StatusOK, join.Code, join.Body.String())
 	assert.Contains(t, join.Body.String(), `"status":"ADMITTED"`)
 	assert.Contains(t, join.Body.String(), `"accessToken"`)
+}
+
+func TestNew_ShouldTraceJoin_ButNotSSEStreamOrHealthCheck(t *testing.T) {
+	rec := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec))
+	prevTP, prevProp := otel.GetTracerProvider(), otel.GetTextMapPropagator()
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() {
+		otel.SetTracerProvider(prevTP)
+		otel.SetTextMapPropagator(prevProp)
+		_ = tp.Shutdown(context.Background())
+	})
+	r := newRig(t, nil)
+
+	join := r.do(http.MethodPost, "/api/queue/v1/event/"+evt+"/join")
+	require.Equal(t, http.StatusOK, join.Code)
+	var env struct {
+		Data struct {
+			QueueToken string `json:"queueToken"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(join.Body.Bytes(), &env))
+	r.do(http.MethodGet, "/sys/ping")
+	stream := r.do(http.MethodGet, "/api/queue/v1/event/"+evt+"/"+env.Data.QueueToken+"/stream")
+
+	assert.Equal(t, http.StatusOK, stream.Code)
+	assert.Contains(t, stream.Body.String(), "event: admitted", "SSE tetap berfungsi lewat rantai middleware")
+	assert.Len(t, rec.Ended(), 1, "hanya join yang di-trace; health check & SSE dikecualikan")
 }
 
 func TestNew_ShouldRateLimitJoin_PerIP(t *testing.T) {

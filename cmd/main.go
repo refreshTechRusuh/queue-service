@@ -17,6 +17,7 @@ import (
 	"github.com/refreshTechRusuh/queue-service/internal/config"
 	"github.com/refreshTechRusuh/queue-service/internal/delivery"
 	pkgdb "github.com/refreshTechRusuh/queue-service/pkg/db"
+	pkgotel "github.com/refreshTechRusuh/queue-service/pkg/otel"
 	pkgredis "github.com/refreshTechRusuh/queue-service/pkg/redis"
 )
 
@@ -32,6 +33,18 @@ func main() {
 	// rootCtx dibatalkan saat shutdown → menghentikan hub, sweeper, consumer Kafka.
 	rootCtx, cancelRoot := context.WithCancel(context.Background())
 	defer cancelRoot()
+
+	// OpenTelemetry -> GCP Cloud Trace. OTEL_ENABLED=false mematikan (lokal/test).
+	// Gagal setup TIDAK menggagalkan service: tracing hanya observabilitas.
+	if otelShutdown, err := pkgotel.SetupTracerProvider(rootCtx, "queue-service", "1.0.0"); err != nil {
+		slog.Warn("otel: gagal setup tracer provider, tracing nonaktif", "err", err)
+	} else {
+		defer func() {
+			shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = otelShutdown(shutCtx)
+		}()
+	}
 
 	// 2. Redis = sumber state antrian. Gagal konek = gagal start (fail fast).
 	rdb, err := pkgredis.NewClient(rootCtx, cfg.Redis)
