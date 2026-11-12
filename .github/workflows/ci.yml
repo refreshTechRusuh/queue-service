@@ -1,0 +1,113 @@
+name: CI
+
+# Gerbang kualitas: build/vet/test (race) + coverage, lint, gosec, govulncheck.
+# Sengaja terpisah dari deploy.yml supaya jalur deploy tidak tersentuh.
+#
+# Catatan: branch protection tidak tersedia di paket GitHub repo ini, jadi hasil CI
+# tampil di PR tetapi tidak otomatis memblokir merge. Biasakan memeriksa status hijau.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 2 * * 1" # Senin 02:00 UTC: temukan celah baru walau tidak ada PR
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read # golangci-lint-action (only-new-issues) membaca patch PR
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # "1.26" + check-latest => selalu patch Go terbaru, sehingga pustaka standar ikut ter-patch.
+  # (go-version-file: go.mod akan memakai 1.26.0 persis yang punya banyak temuan govulncheck.)
+  GO_VERSION: "1.26"
+  # Minimum coverage (%) setelah konektor infra dikecualikan.
+  COVERAGE_MIN: "80"
+  # Paket konektor infrastruktur (butuh Postgres/Redis/Kafka/GCP asli) tidak dihitung.
+  COVERAGE_EXCLUDE: "/cmd/|/_mock/|/pkg/db/|/pkg/redis/|/pkg/valkey/|/pkg/kafka/|/pkg/otel/"
+  GOSEC_VERSION: v2.30.0
+  GOVULNCHECK_VERSION: v1.9.0
+
+jobs:
+  test:
+    name: Test & coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+
+      - name: Build & vet
+        run: |
+          go build ./...
+          go vet ./...
+
+      - name: Test (race + coverage)
+        run: go test ./... -race -covermode=atomic -coverprofile=coverage.out -timeout 10m
+
+      - name: Coverage gate
+        run: |
+          head -1 coverage.out > coverage.filtered.out
+          tail -n +2 coverage.out | grep -vE "$COVERAGE_EXCLUDE" >> coverage.filtered.out || true
+          total=$(go tool cover -func=coverage.filtered.out | awk '/^total:/ {gsub("%","",$3); print $3}')
+          echo "Coverage (tanpa konektor infra): ${total}% — minimum ${COVERAGE_MIN}%"
+          awk -v t="$total" -v m="$COVERAGE_MIN" 'BEGIN { if (t+0 < m+0) { printf "::error::Coverage %.1f%% di bawah minimum %.1f%%\n", t, m; exit 1 } }'
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: coverage
+          path: coverage.out
+          if-no-files-found: ignore
+          retention-days: 7
+
+  lint:
+    name: Lint
+    # only-new-issues hanya berlaku di PR: utang lama tidak memblokir, masalah baru ditolak.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15.0
+          only-new-issues: true
+
+  gosec:
+    name: Security (gosec)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@${{ env.GOSEC_VERSION }}
+      - name: Run gosec
+        run: gosec -quiet -exclude-dir=_mock ./...
+
+  govulncheck:
+    name: Vulnerabilities (govulncheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+      - name: Run govulncheck
+        run: govulncheck ./...

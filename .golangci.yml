@@ -1,0 +1,54 @@
+version: "2"
+run:
+  timeout: 5m
+linters:
+  default: standard
+  enable:
+    - depguard
+  settings:
+    depguard:
+      rules:
+        # ADR-004: domain/ tidak boleh import application/ atau infrastructure/.
+        domain-stays-out-of-inner-layers:
+          files:
+            - "**/internal/*/domain/**"
+          list-mode: lax
+          deny:
+            - pkg: github.com/refreshTechRusuh/queue-service/internal
+              desc: "domain/ must not import application/ or infrastructure/ (ADR-004)"
+          allow:
+            - github.com/refreshTechRusuh/queue-service/internal/queue/domain
+            - github.com/refreshTechRusuh/queue-service/pkg
+        # ADR-004: klien infra hanya boleh di infrastructure/ (+ delivery/ sebagai composition root).
+        infra-clients-only-in-infrastructure:
+          files:
+            - "**/internal/**"
+            - "!$test"
+            - "!**/internal/*/infrastructure/**"
+            - "!**/internal/delivery/**"
+          list-mode: lax
+          deny:
+            - pkg: net/http
+              desc: "HTTP client/server belongs in infrastructure/ (ADR-004)"
+            - pkg: github.com/jackc/pgx/v5
+              desc: "use pkg/db from infrastructure/ (ADR-004)"
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters: [errcheck]
+        path: _test\.go$
+      # Exporter Cloud Trace sudah ditandai deprecated oleh Google (pengganti: OTLP). Sama dengan
+      # BE-2; migrasi dicatat sebagai pekerjaan lanjutan, bukan alasan CI merah.
+      - linters: [staticcheck]
+        path: pkg/otel/tracing\.go$
+        text: "SA1019"
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    generated: lax

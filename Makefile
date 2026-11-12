@@ -15,3 +15,9 @@ golint:
 	golangci-lint run --timeout 5m
 docker-build: build
 	docker build -f Dockerfile -t queue-service:latest .
+scan:
+	@echo "Running security scan"
+	gosec -exclude-dir=_mock ./...
+vuln:
+	@echo "Running vulnerability scan"
+	govulncheck ./...
