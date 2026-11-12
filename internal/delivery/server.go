@@ -83,12 +83,16 @@ func New(ctx context.Context, cfg *config.Config, rdb *goredis.Client, pool *pgx
 		_, _ = w.Write([]byte(`{"status":"00000","message":"queue-service ok","data":{}}`))
 	})
 
-	// Middleware global (luar -> dalam): CORS, tracing, transaction-id.
+	// Middleware global (luar -> dalam): header keamanan, CORS, batas body, tracing, transaction-id.
+	// Header keamanan paling luar agar ada di semua response (termasuk preflight & 413);
+	// batas body di dalam CORS agar 413 tetap membawa header CORS.
 	// CORS di luar tracing agar preflight tidak membuat span. /stream (SSE berjam-jam)
 	// dan /sys/ping dikecualikan: span SSE baru selesai saat koneksi putus dan health
 	// check hanya menambah noise.
 	return middleware.Chain(mux,
+		middleware.SecurityHeaders,
 		middleware.CORSMiddleware("*"),
+		middleware.MaxBody(0), // 0 = default 1 MB
 		middleware.OtelMiddleware("queue-service", "/sys/ping", "/stream"),
 		middleware.TransactionID,
 	), closeFn

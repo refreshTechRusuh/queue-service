@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -195,4 +196,55 @@ func TestRunSweeper_ShouldKeepRunning_WhenSweepFails(t *testing.T) {
 
 	require.Eventually(t, func() bool { return calls.Load() >= 3 }, 2*time.Second, 5*time.Millisecond,
 		"satu sweep gagal tidak boleh mematikan sweeper (kalau mati, antrian macet)")
+}
+
+// ---------------------------------------------------------------- keamanan
+
+func TestNew_ShouldSetSecurityHeaders_OnEveryKindOfResponse(t *testing.T) {
+	r := newRig(t, nil)
+
+	for name, rr := range map[string]*httptest.ResponseRecorder{
+		"200 health":        r.do(http.MethodGet, "/sys/ping"),
+		"404 route tak ada": r.do(http.MethodGet, "/tidak/ada"),
+		"400 id tak valid":  r.do(http.MethodPost, "/api/queue/v1/event/bukan-uuid/join"),
+		"preflight OPTIONS": r.do(http.MethodOptions, "/api/queue/v1/event/"+evt+"/join"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, "nosniff", rr.Header().Get("X-Content-Type-Options"))
+			assert.Equal(t, "default-src 'none'", rr.Header().Get("Content-Security-Policy"))
+			assert.Equal(t, "no-store", rr.Header().Get("Cache-Control"))
+			assert.NotEmpty(t, rr.Header().Get("Strict-Transport-Security"))
+			assert.Empty(t, rr.Header().Get("X-Frame-Options"))
+		})
+	}
+}
+
+func TestNew_ShouldReturn413_WithCORS_WhenBodyOverOneMB(t *testing.T) {
+	r := newRig(t, nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/queue/v1/event/"+evt+"/join", strings.NewReader(strings.Repeat("a", (1<<20)+1)))
+	req.Header.Set("Origin", "https://fe.example")
+	rr := httptest.NewRecorder()
+
+	r.h.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rr.Code)
+	assert.Equal(t, "https://fe.example", rr.Header().Get("Access-Control-Allow-Origin"))
+}
+
+func TestNew_SSEStream_ShouldKeepNoCache_NotOverwrittenByNoStoreDefault(t *testing.T) {
+	r := newRig(t, nil)
+	join := r.do(http.MethodPost, "/api/queue/v1/event/"+evt+"/join")
+	require.Equal(t, http.StatusOK, join.Code)
+	var env struct {
+		Data struct {
+			QueueToken string `json:"queueToken"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(join.Body.Bytes(), &env))
+
+	stream := r.do(http.MethodGet, "/api/queue/v1/event/"+evt+"/"+env.Data.QueueToken+"/stream")
+
+	assert.Equal(t, "no-cache", stream.Header().Get("Cache-Control"), "SSE butuh no-cache dari handlernya sendiri")
+	assert.Equal(t, "text/event-stream", stream.Header().Get("Content-Type"))
+	assert.Equal(t, "nosniff", stream.Header().Get("X-Content-Type-Options"))
 }
