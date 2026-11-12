@@ -23,7 +23,7 @@ func NewPool(ctx context.Context, cfg Config) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("db: parse config: %w", err)
 	}
-	poolCfg.MaxConns = int32(cfg.MaxConns)
+	poolCfg.MaxConns = toInt32(cfg.MaxConns)
 	poolCfg.MaxConnIdleTime = 5 * time.Minute
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {

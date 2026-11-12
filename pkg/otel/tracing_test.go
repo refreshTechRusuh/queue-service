@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/propagation"
 )
 
 // Jalur "aktif" mengekspor ke GCP Cloud Trace (butuh kredensial) sehingga tidak diuji di sini.
@@ -37,7 +36,6 @@ func TestSetupTracerProvider_Disabled_ShouldStillPropagateTraceContext(t *testin
 
 	assert.Contains(t, otel.GetTextMapPropagator().Fields(), "traceparent",
 		"walau tracing dimatikan, service tetap meneruskan traceparent ke hilir")
-	var _ propagation.TextMapPropagator = otel.GetTextMapPropagator()
 }
 
 func TestSampleRatio(t *testing.T) {
