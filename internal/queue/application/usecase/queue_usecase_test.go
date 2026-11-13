@@ -272,6 +272,18 @@ func TestJoin_ShouldNeverExceedCap_WhenManyJoinConcurrently(t *testing.T) {
 	}
 }
 
+// countAdmitted melakukan n kali join dan menghitung berapa yang langsung ADMITTED.
+func (e *env) countAdmitted(t *testing.T, eventID string, n int) int {
+	t.Helper()
+	admitted := 0
+	for i := 0; i < n; i++ {
+		if e.join(t, eventID).Status == "ADMITTED" {
+			admitted++
+		}
+	}
+	return admitted
+}
+
 // Rumus cap di Lua HARUS identik dengan entity.CapByStock.
 func TestCap_LuaShouldMatchDomainFormula(t *testing.T) {
 	stocks := []int{0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 31, 100}
@@ -281,13 +293,7 @@ func TestCap_LuaShouldMatchDomainFormula(t *testing.T) {
 				e := newEnv(t, opts{globalCap: globalCap})
 				eventID := e.newEvent(s)
 				want := entity.CapByStock(s, globalCap)
-				admitted := 0
-				for i := 0; i < want+5; i++ {
-					if e.join(t, eventID).Status == "ADMITTED" {
-						admitted++
-					}
-				}
-				if admitted != want {
+				if admitted := e.countAdmitted(t, eventID, want+5); admitted != want {
 					t.Errorf("stok %d plafon %d: Lua meng-admit %d; rumus Go %d", s, globalCap, admitted, want)
 				}
 			})
