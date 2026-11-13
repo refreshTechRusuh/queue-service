@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -75,4 +76,14 @@ func TestCORS_Wildcard_CurrentlyReflectsOriginWithCredentials(t *testing.T) {
 
 	assert.Equal(t, "https://situs-asing.example", rr.Header().Get("Access-Control-Allow-Origin"))
 	assert.Equal(t, "true", rr.Header().Get("Access-Control-Allow-Credentials"))
+}
+
+// Library SSE berbasis fetch mengirim Cache-Control & Last-Event-ID (saat reconnect);
+// tanpa ini browser memblokir preflight stream lintas origin.
+func TestCORS_Preflight_ShouldAllowTokenAndSSEHeaders(t *testing.T) {
+	rr, _ := runCORS(t, []string{"*"}, http.MethodOptions, "https://fe.example")
+	allowed := strings.ToLower(rr.Header().Get("Access-Control-Allow-Headers"))
+	for _, h := range []string{"x-access-token", "x-payment-token", "cache-control", "last-event-id", "accept"} {
+		assert.Contains(t, allowed, h)
+	}
 }
