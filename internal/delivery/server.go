@@ -48,7 +48,9 @@ func New(ctx context.Context, cfg *config.Config, rdb *goredis.Client, pool *pgx
 	go hub.Run(ctx)
 	go runSweeper(ctx, uc.Sweep, cfg.Queue.SweepInterval, log)
 
-	closeFn := func() {}
+	closeFn := func() {
+		// Default no-op: tanpa Kafka tidak ada dependensi yang perlu ditutup.
+	}
 	if cfg.Kafka.Enabled {
 		consumer := event.NewConsumer(uc, kafka.Config{
 			Brokers:  cfg.Kafka.Brokers,

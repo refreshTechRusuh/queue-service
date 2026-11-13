@@ -2,6 +2,13 @@ package middleware
 
 import "net/http"
 
+// Nilai header CORS yang sama untuk semua origin yang diizinkan.
+const (
+	corsAllowMethods = "GET, POST, PUT, DELETE, OPTIONS"
+	corsAllowHeaders = "Content-Type, Authorization, X-Access-Token, X-Guest-Session-ID, X-Payment-Token"
+	corsMaxAge       = "86400"
+)
+
 // CORSMiddleware menambahkan header CORS ke semua response.
 // Mendukung preflight (OPTIONS) agar browser bisa pre-check sebelum request aktual.
 //
@@ -13,36 +20,12 @@ import "net/http"
 // Access-Control-Allow-Origin hanya bisa satu nilai, jadi origin yang cocok
 // di-echo balik. Kalau tidak ada yang cocok, header tidak di-set (browser blokir).
 func CORSMiddleware(allowedOrigins ...string) func(http.Handler) http.Handler {
-	// Bangun set untuk O(1) lookup.
-	set := make(map[string]struct{}, len(allowedOrigins))
-	wildcard := false
-	for _, o := range allowedOrigins {
-		if o == "*" {
-			wildcard = true
-		}
-		set[o] = struct{}{}
-	}
+	isAllowed := originMatcher(allowedOrigins)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			origin := r.Header.Get("Origin")
-
-			if origin != "" {
-				allowed := wildcard
-				if !allowed {
-					_, allowed = set[origin]
-				}
-
-				if allowed {
-					// Echo origin yang spesifik agar Vary di-set dan
-					// browser tidak cache response untuk origin lain.
-					w.Header().Set("Vary", "Origin")
-					w.Header().Set("Access-Control-Allow-Origin", origin)
-					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-					w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Access-Token, X-Guest-Session-ID, X-Payment-Token")
-					w.Header().Set("Access-Control-Allow-Credentials", "true")
-					w.Header().Set("Access-Control-Max-Age", "86400")
-				}
+			if origin := r.Header.Get("Origin"); origin != "" && isAllowed(origin) {
+				setCORSHeaders(w.Header(), origin)
 			}
 
 			// Preflight: browser kirim OPTIONS sebelum request aktual.
@@ -55,4 +38,30 @@ func CORSMiddleware(allowedOrigins ...string) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// originMatcher membangun pemeriksa origin dengan lookup O(1); "*" mengizinkan semua.
+func originMatcher(allowedOrigins []string) func(string) bool {
+	set := make(map[string]struct{}, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		if o == "*" {
+			return func(string) bool { return true }
+		}
+		set[o] = struct{}{}
+	}
+	return func(origin string) bool {
+		_, ok := set[origin]
+		return ok
+	}
+}
+
+// setCORSHeaders meng-echo origin yang spesifik (bukan "*") supaya Vary di-set
+// dan browser tidak memakai cache response untuk origin lain.
+func setCORSHeaders(h http.Header, origin string) {
+	h.Set("Vary", "Origin")
+	h.Set("Access-Control-Allow-Origin", origin)
+	h.Set("Access-Control-Allow-Methods", corsAllowMethods)
+	h.Set("Access-Control-Allow-Headers", corsAllowHeaders)
+	h.Set("Access-Control-Allow-Credentials", "true")
+	h.Set("Access-Control-Max-Age", corsMaxAge)
 }
