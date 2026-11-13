@@ -5,7 +5,7 @@ import "net/http"
 // Nilai header CORS yang sama untuk semua origin yang diizinkan.
 const (
 	corsAllowMethods = "GET, POST, PUT, DELETE, OPTIONS"
-	corsAllowHeaders = "Content-Type, Authorization, X-Access-Token, X-Guest-Session-ID, X-Payment-Token"
+	corsAllowHeaders = "Content-Type, Authorization, X-Access-Token, X-Guest-Session-ID, X-Payment-Token, X-Transaction-Id, Cache-Control, Last-Event-ID, Accept"
 	corsMaxAge       = "86400"
 )
 
